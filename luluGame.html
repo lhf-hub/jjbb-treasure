@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>噜噜：心动收集大作战</title>
+    <style>
+        :root {
+            --bg-color: #ffeef2;
+            --primary-pink: #ff85a1;
+            --accent-gold: #fcc419;
+        }
+        body, html {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            overflow: hidden; font-family: 'Microsoft YaHei', sans-serif;
+            background: var(--bg-color); touch-action: none;
+        }
+        #game-container { position: relative; width: 100%; height: 100%; }
+        canvas { display: block; }
+        
+        /* UI 涂层 */
+        #ui-layer {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none;
+        }
+        .score-box {
+            position: absolute; top: 40px; width: 100%; text-align: center;
+            font-size: 24px; font-weight: bold; color: #ff4757; text-shadow: 2px 2px white;
+        }
+        #message-popup {
+            position: absolute; top: 45%; left: 50%; transform: translate(-50%, -50%);
+            font-size: 20px; color: #ff6b81; font-weight: bold;
+            opacity: 0; transition: 0.3s; pointer-events: none;
+            white-space: nowrap; text-shadow: 1px 1px #fff;
+        }
+        
+        /* 引导页 */
+        #start-screen {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(255, 238, 242, 0.95);
+            display: flex; flex-direction: column; justify-content: center;
+            align-items: center; z-index: 100;
+        }
+        .start-btn {
+            padding: 15px 40px; font-size: 20px; background: #ff85a1;
+            color: white; border: none; border-radius: 30px;
+            cursor: pointer; box-shadow: 0 4px 15px rgba(255, 133, 161, 0.4);
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse { 0% {transform: scale(1);} 50% {transform: scale(1.1);} 100% {transform: scale(1);} }
+        
+        /* 游戏结束 */
+        #game-over {
+            display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            text-align: center; z-index: 101; background: white; padding: 30px;
+            border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); width: 80%;
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <canvas id="gameCanvas"></canvas>
+    <div id="ui-layer">
+        <div class="score-box">心动值: <span id="scoreVal">0</span></div>
+        <div id="message-popup">噜噜最棒！</div>
+    </div>
+
+    <!-- 初始界面 -->
+    <div id="start-screen">
+        <h1 style="color: #ff4757; margin-bottom: 10px;">噜噜大冒险</h1>
+        <p style="color: #666; width: 80%; text-align: center;">拖动下方头像，帮<b>噜噜</b>接住快乐，躲开烦恼！</p>
+        <div style="font-size: 50px; margin: 20px;">🐱</div>
+        <button class="start-btn" onclick="startGame()">开始传递快乐</button>
+    </div>
+
+    <!-- 结束界面 -->
+    <div id="game-over">
+        <h2 id="over-title">挑战结束</h2>
+        <p id="over-msg"></p>
+        <button class="start-btn" onclick="location.reload()" style="animation:none;">重新开始</button>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const scoreVal = document.getElementById('scoreVal');
+    const msgPopup = document.getElementById('message-popup');
+    
+    let score = 0;
+    let gameActive = false;
+    let items = [];
+    let player = { x: 0, y: 0, w: 70, h: 70, icon: '🐱' };
+    let speedMult = 1;
+    let particles = [];
+
+    const sweetTalk = ["噜噜美极了！", "想为你摘星星", "快去喝奶茶🥤", "今天也要开心！", "抱抱噜噜", "你是我的小确幸"];
+    const catchItems = [
+        { icon: '❤️', value: 10, type: 'good' },
+        { icon: '🍰', value: 15, type: 'good' },
+        { icon: '🧋', value: 20, type: 'good' },
+        { icon: '🛍️', value: 25, type: 'good' },
+        { icon: '🎁', value: 50, type: 'good' }
+    ];
+    const avoidItems = [
+        { icon: '💣', value: -20, type: 'bad' },
+        { icon: '⛈️', value: -10, type: 'bad' },
+        { icon: '🦟', value: -5, type: 'bad' },
+        { icon: '💼', value: -15, type: 'bad' }
+    ];
+
+    function initCanvas() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        player.x = canvas.width / 2 - player.w / 2;
+        player.y = canvas.height - 120;
+    }
+
+    // 监听输入
+    function handleInput(e) {
+        let clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        player.x = clientX - player.w / 2;
+        // 边界限制
+        if (player.x < 0) player.x = 0;
+        if (player.x > canvas.width - player.w) player.x = canvas.width - player.w;
+    }
+
+    window.addEventListener('mousemove', handleInput);
+    window.addEventListener('touchmove', handleInput);
+    window.addEventListener('resize', initCanvas);
+
+    function startGame() {
+        document.getElementById('start-screen').style.display = 'none';
+        initCanvas();
+        score = 0;
+        items = [];
+        gameActive = true;
+        speedMult = 1;
+        requestAnimationFrame(update);
+        spawnItem();
+    }
+
+    function spawnItem() {
+        if (!gameActive) return;
+        
+        let isGood = Math.random() > 0.35;
+        let pool = isGood ? catchItems : avoidItems;
+        let template = pool[Math.floor(Math.random() * pool.length)];
+        
+        items.push({
+            x: Math.random() * (canvas.width - 40),
+            y: -50,
+            vy: (Math.random() * 2 + 2) * speedMult,
+            ...template
+        });
+
+        setTimeout(spawnItem, 1000 / (speedMult * 0.8));
+    }
+
+    function showPopup(txt) {
+        msgPopup.innerText = txt;
+        msgPopup.style.opacity = 1;
+        setTimeout(() => msgPopup.style.opacity = 0, 800);
+    }
+
+    function update() {
+        if (!gameActive) return;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // 绘制玩家 (撸噜吧)
+        ctx.font = '60px Arial';
+        ctx.textAlign = 'left';
+        ctx.fillText(player.icon, player.x, player.y + 50);
+
+        // 绘制并更新物品
+        for (let i = items.length - 1; i >= 0; i--) {
+            let it = items[i];
+            it.y += it.vy;
+            ctx.font = '40px Arial';
+            ctx.fillText(it.icon, it.x, it.y);
+
+            // 碰撞检测
+            if (it.y > player.y - 40 && it.y < player.y + 20 &&
+                it.x > player.x - 30 && it.x < player.x + player.w) {
+                
+                score += it.value;
+                scoreVal.innerText = score;
+                
+                if (it.type === 'good') {
+                    showPopup(sweetTalk[Math.floor(Math.random() * sweetTalk.length)]);
+                    // 粒子效果
+                    for(let j=0; j<5; j++) createParticle(it.x, it.y, '#ff4757');
+                } else {
+                    showPopup('别让坏心情碰到！');
+                    for(let j=0; j<5; j++) createParticle(it.x, it.y, '#57606f');
+                }
+                
+                items.splice(i, 1);
+                speedMult = 1 + (score / 500); // 难度随积分提升
+                continue;
+            }
+
+            // 移除出屏物品
+            if (it.y > canvas.height) items.splice(i, 1);
+        }
+
+        updateParticles();
+        
+        if (score < -50) endGame(); // 负分门槛
+        else requestAnimationFrame(update);
+    }
+
+    // 粒子系统
+    function createParticle(x, y, color) {
+        particles.push({
+            x, y, 
+            vx: (Math.random()-0.5)*10, 
+            vy: (Math.random()-0.5)*10, 
+            life: 1.0, 
+            color
+        });
+    }
+
+    function updateParticles() {
+        for(let i = particles.length-1; i>=0; i--) {
+            let p = particles[i];
+            p.x += p.vx; p.y += p.vy;
+            p.life -= 0.05;
+            if(p.life <= 0) {
+                particles.splice(i, 1);
+            } else {
+                ctx.globalAlpha = p.life;
+                ctx.fillStyle = p.color;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 4, 0, Math.PI*2);
+                ctx.fill();
+            }
+        }
+        ctx.globalAlpha = 1.0;
+    }
+
+    function endGame() {
+        gameActive = false;
+        document.getElementById('game-over').style.display = 'block';
+        document.getElementById('over-msg').innerText = `噜噜获得了 ${score} 点快乐值！虽然碰到了一点小麻烦，但依然是最棒的噜噜！❤️`;
+    }
+</script>
+</body>
+</html>
